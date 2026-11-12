@@ -157,37 +157,65 @@ static int find_worst_partner(int candidate, int** scores,
 ///      - match_sets: An array of sets where match_sets[i] contains the indices
 ///                    of individuals currently matched with individual `i`.
 
-bool try_propose(const int proposer, 
+bool try_propose(const int proposer,
                         const size_t iter,
-                        int** sorted_indices, 
-                        int** scores, 
-                        bool** matched, 
+                        int** sorted_indices,
+                        int** scores,
+                        bool** matched,
                         int* cur_poss,
-                        const int ucount, 
+                        const int ucount,
                         std::set<int>* match_sets) {
-    // TODO
-    return false;
+    // Walk down the proposer's preference list from where we last stopped.
+    while (cur_poss[proposer] < ucount) {
+        const int candidate = sorted_indices[proposer][cur_poss[proposer]];
+        ++cur_poss[proposer];  // this candidate has now been considered
+
+        if (candidate == proposer) continue;                    // never self-match
+        if (scores[proposer][candidate] == -1) continue;        // not allowed
+        if (matched[proposer][candidate]) continue;             // already paired
+
+        // Candidate has spare capacity: accept immediately.
+        if (match_sets[candidate].size() < iter) {
+            addmatch(proposer, candidate, matched, match_sets);
+            return true;
+        }
+
+        // Candidate is full: replace their worst partner if proposer is better.
+        const int worst = find_worst_partner(candidate, scores, match_sets);
+        if (worst != -1 &&
+            scores[candidate][proposer] > scores[candidate][worst]) {
+            removematch(candidate, worst, matched, match_sets);
+            addmatch(proposer, candidate, matched, match_sets);
+            return true;
+        }
+        // Otherwise rejected: try the next candidate.
+    }
+    return false;  // ran out of candidates
 }
 
-/// make_matches(target, sorted_indices, scores, matched, cur_poss,
-///              ucount, match_sets):
-///     Iterate proposal rounds from `iter = 1` to `iter = target`. In each
-///     round, keep making passes over every proposer until a full pass makes
-///     no new matches (i.e. no call to `try_propose` returns true).
-///     Ensure that `cur_poss` is reset at the start of the function (i.e. 
-///     `cur_poss[i] = 0` for all `i`). Only propose if the proposer has
-///     remaining capacity (i.e. `match_sets[proposer].size() < iter`).
-
-void make_matches(const int target, 
-                  int** sorted_indices, 
+void make_matches(const int target,
+                  int** sorted_indices,
                   int** scores,
-                  bool** matched, 
+                  bool** matched,
                   int* cur_poss,
                   const int ucount,
                   std::set<int>* match_sets) {
+    std::fill(cur_poss, cur_poss + ucount, 0);
 
-    // TODO
-    return;
+    for (int iter = 1; iter <= target; ++iter) {
+        const size_t cap = static_cast<size_t>(iter);
+        bool progress = true;
+        while (progress) {               // repeat passes until nothing changes
+            progress = false;
+            for (int p = 0; p < ucount; ++p) {
+                if (match_sets[p].size() < cap &&
+                    try_propose(p, cap, sorted_indices, scores, matched,
+                                cur_poss, ucount, match_sets)) {
+                    progress = true;
+                }
+            }
+        }
+    }
 }
 
 // ================================================
