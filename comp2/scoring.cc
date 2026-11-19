@@ -110,17 +110,109 @@ bool is_cheating(const User& u1, const User& u2, std::size_t nquestions,
 ///     Check if users `u1` and `u2` are compatible matches based on various
 ///     criteria specified in the README.
 
+namespace {
+    /// age_ok(chooser, other):
+    ///     True if `other`'s age falls within `chooser`'s age preferences.
+    ///     A missing min or max means "no limit" on that side.
+
+    static inline bool age_ok(const User& chooser, const User& other) noexcept {
+        if (chooser.min_compatible_age && other.age < *chooser.min_compatible_age) {
+            return false;
+        }
+        if (chooser.max_compatible_age && other.age > *chooser.max_compatible_age) {
+            return false;
+        }
+        return true;
+    }
+
+    /// blocks_house(blocker, other):
+    ///     True if `blocker` has blocked the house that `other` lives in.
+
+    static inline bool blocks_house(const User& blocker, const User& other) {
+        return std::find(blocker.blocked_houses.begin(),
+                         blocker.blocked_houses.end(),
+                         other.house) != blocker.blocked_houses.end();
+    }
+}
+
 bool check_compatibility(const User& u1, const User& u2) {
-    // TODO
-    return false;
+    // 1. Users can't match with themselves.
+    if (u1.id == u2.id) {
+        return false;
+    }
+
+    // 2. Cross-school matching is disabled: colleges must be the same.
+    if (u1.college != u2.college) {
+        return false;
+    }
+
+    // 3. Both must want the same kind of match (love or friendship) with
+    //    each other. NEITHER means their preferences don't line up.
+    if (get_match_type(u1, u2) == MatchType::NEITHER) {
+        return false;
+    }
+
+    // 4. Mutual crushes are always compatible: skip every remaining rule.
+    if (get_crush_type(u1, u2) == Crush::MUTUAL) {
+        return true;
+    }
+
+    // 5. Class years can be at most YEAR_DIFF_MAX apart.
+    if (std::abs(u1.year - u2.year) > YEAR_DIFF_MAX) {
+        return false;
+    }
+
+    // 6. Age preferences must hold in both directions.
+    if (!age_ok(u1, u2) || !age_ok(u2, u1)) {
+        return false;
+    }
+
+    // 7. If either user opted out of same-house matches, they can't share one.
+    //    (An empty house means "unknown", so it never counts as the same house.)
+    if ((u1.no_house_matches || u2.no_house_matches) &&
+        !u1.house.empty() && u1.house == u2.house) {
+        return false;
+    }
+
+    // 8. Neither user may live in a house the other has blocked.
+    if (blocks_house(u1, u2) || blocks_house(u2, u1)) {
+        return false;
+    }
+
+    return true;
 }
 
 /// bonus(u1, u2):
-///    Implement this according to the README instructions.
+///    Our new feature: "seriousness alignment", plus credit for one-way crushes.
+///
+///    - Seriousness (0..3) says how serious someone is about their match
+///      (e.g. 0 = just for fun, 3 = looking for something real). Two people
+///      with similar intentions are a better match, so we give up to
+///      SERIOUSNESS_WEIGHT points, decreasing linearly with the gap:
+///          gap 0 -> full points, gap 3 -> 0 points.
+///    - A one-way crush (and they are otherwise compatible) earns a small
+///      extra ONE_WAY_CRUSH_BONUS, since mutual crushes are already handled
+///      by check_compatibility.
 
 float bonus(const User& u1, const User& u2) {
-    // TODO
-    return 0.0f;
+    static constexpr float SERIOUSNESS_WEIGHT  = 0.25f;
+    static constexpr float SERIOUSNESS_RANGE   = 3.0f;  // scale is 0..3
+    static constexpr float ONE_WAY_CRUSH_BONUS = 0.15f;
+
+    float points = 0.0f;
+
+    // Seriousness alignment (clamp the gap in case of out-of-range input).
+    const float gap = std::min(
+        static_cast<float>(std::abs(u1.seriousness - u2.seriousness)),
+        SERIOUSNESS_RANGE);
+    points += SERIOUSNESS_WEIGHT * (1.0f - gap / SERIOUSNESS_RANGE);
+
+    // One-way crush bonus.
+    if (get_crush_type(u1, u2) == Crush::ONE_WAY && check_compatibility(u1, u2)) {
+        points += ONE_WAY_CRUSH_BONUS;
+    }
+
+    return points;
 }
 
 /// ================================
